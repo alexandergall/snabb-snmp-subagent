@@ -1,0 +1,34 @@
+Snabb-SNMP-Agent version 0.01
+===========================
+
+This module provides an SNMP sub-agent that connects to a shared
+memory segment of a Snabb Switch application which exports MIB
+objects.  It connects to a SNMP master agent through the AgentX
+protocol.
+
+INSTALLATION
+
+To install this module type the following:
+
+   perl Makefile.PL
+   make
+   make test
+   make install
+
+DEPENDENCIES
+
+This module requires these other modules and libraries:
+
+  blah blah blah
+
+COPYRIGHT AND LICENCE
+
+TBD
+
+Copyright (C) 2016 Alexander Gall <gall@switch.ch>
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.20.2 or,
+at your option, any later version of Perl 5 you may have available.
+
+

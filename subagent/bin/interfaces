@@ -1,0 +1,78 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use Snabb::SNMP::Agent qw(%persistent_ifIndex %compound_scalar_handlers $sysUpTime);
+my %opt = ( 'check-interval' => 5,
+            'shmem-dir' => '/tmp/snabb-shmem', );
+
+sub usage() {
+  print <<"EOF";
+usage: $0 --ifindex=<file>
+EOF
+  exit(1);
+}
+
+sub ifTable_indexer($$$) {
+  ## Force persistent ifIndex based on ifDescr
+  my ($oid, $table_oid, $segment) = @_;
+  my $ifDescr_obj = $segment->{objs}{ifDescr};
+  defined $ifDescr_obj or die
+    "ifTable IID indexer: no ifDescr present for $segment->{name}";
+  tie my $ifDescr, 'Snabb::SNMP::Tie::OCTETSTR', $segment,
+    'ifDescr';
+  my $ifIndex = $persistent_ifIndex{$ifDescr};
+  defined $ifIndex or die
+    "ifTable IID indexer: unknown interface $ifDescr";
+  return($oid.".".$ifIndex);
+}
+
+my %subtrees =
+  ( interfaces =>
+    { tables =>
+      { scalars =>
+	{ handlers =>
+	  { ifNumber =>
+	    { compound_handler => sub {
+		return scalar(keys(%persistent_ifIndex));
+	      }
+	    },
+	  },
+	},
+	ifTable => { indexer => \&ifTable_indexer },
+      },
+    },
+
+    ifMIB =>
+    { tables =>
+      { scalars =>
+	{ handlers =>
+	  { ifTableLastChange =>
+	    { compound_handler => sub {
+		return $sysUpTime;
+	      }
+	    },
+	  },
+	},
+	ifXTable => { indexer => \&ifTable_indexer },
+      },
+    },
+  );
+
+GetOptions(\%opt, "check-interval=i",
+           "ifindex=s") or usage();
+defined $opt{ifindex} or usage();
+Snabb::SNMP::Agent::start({ name => "interfaces",
+                            subtrees => \%subtrees,
+			    check_interval => $opt{'check-interval'},
+			    if_index => $opt{ifindex},
+                            mibs_dirs => '',
+                            mibs => '',
+                            shmem_dir => $opt{'shmem-dir'},
+			  });
+
+## Not reached
+
+## Local Variables:
+## mode: CPerl
+## End:

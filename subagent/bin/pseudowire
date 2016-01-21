@@ -1,0 +1,239 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use Snabb::SNMP::Agent qw(%persistent_ifIndex %compound_scalar_handlers);
+my %opt = ( 'check-interval' => 5,
+            'mibs-dirs' => '',
+            'shmem-dir' => '/tmp/snabb-shmem');
+
+sub usage() {
+  print <<"EOF";
+usage: $0 --ifindex=<file>
+EOF
+  exit(1);
+}
+
+## Mappings of PW shared memory segments to the index of the
+## pwTable/cpwVcTable
+my %pwIndex;
+my $pwIndex = 1;
+
+## Indexer for pwTable/cpwVcTable.  It uses the name of the segment
+## that represents a row in these tables to generate the index.
+sub pw_indexer($$$) {
+  my ($oid, $table_oid, $segment) = @_;
+  my $name = $segment->{name};
+  my $index = $pwIndex{$name};
+  unless (defined $index) {
+    $index = $pwIndex++;
+    print("Allocating PW index $index for segment $name\n");
+    $pwIndex{$name} = $index;
+  }
+  return $oid.".".$index;
+}
+
+## Indexer for the pwEnetTable.  It has two indexes.  The first is the
+## pwIndex according to the pw_indexer.  the second is the value of
+## the pwEnetPwInstance object.
+sub pw_enet_indexer($$$) {
+  my ($oid, $table_oid, $segment) = @_;
+  $oid = pw_indexer($oid, $table_oid, $segment);
+  my $pwEnetPwInstance_obj = $segment->{objs}{pwEnetPwInstance};
+  defined $pwEnetPwInstance_obj or
+    die "pw_enet_indexer: no pwEnetPwInstance present for segment "
+      ."$segment->{name}";
+  tie my $pwEnetPwInstance, 'Snabb::SNMP::Tie::INTEGER', $segment,
+    'pwEnetPwInstance';
+
+  ##print("XXX $pwEnetPwInstance\n");
+  return $oid.".".$pwEnetPwInstance;
+}
+
+## Indexer for the cpwVcEnetTable.  It has two indexes.  The first is
+## the cpwVcIndex according to the pw_indexer.  the second is the value
+## of the cpwVcEnetPwVlan object.
+sub cpw_enet_indexer($$$) {
+  my ($oid, $table_oid, $segment) = @_;
+  $oid = pw_indexer($oid, $table_oid, $segment);
+  my $cpwVcEnetPwVlan_obj = $segment->{objs}{cpwVcEnetPwVlan};
+  defined $cpwVcEnetPwVlan_obj or
+    die "cpw_enet_indexer: no cpwVcEnetPwVlan present for segment "
+      ."$segment->{name}";
+  tie my $cpwVcEnetPwVlan, 'Snabb::SNMP::Tie::INTEGER', $segment,
+    'cpwVcEnetPwVlan';
+
+  ##print("XXX $cpwVcEnetPwVlan\n");
+  return $oid.".".$cpwVcEnetPwVlan;
+}
+
+### Definition of the subtrees that will be registered to the master
+### agent.  In the following, the term "object" refers to a string
+### which is either a literal OID (in dotted notation) or a name that
+### can be translated to an OID through the loaded MIBs (via
+### %SNMP::MIB).
+###
+### The keys of %subtrees are objects that designate the subtrees that
+### will be registered with the master agent.  Each subtree may
+### contain two hashes named "handlers" and "tables".  The keys of
+### these hashes are objects which must be part of the subtree.
+### Subtrees must not overlap.
+###
+### The "tables" hash must contain a key called "indexer", which must
+### be a reference to a function that is able to create the full
+### instance ID (IID) for any object in the table.
+###
+### The subtrees are populated with objects from memory segments
+### shared with Snabb instances that use the lib.ipc.shmem mechansim
+### with the name space "MIB" as follows.
+###
+### Once an object is read from the index file of a shared memory
+### segment, a lookup in the subtree hash is performed to find the
+### subtree that contains it.  If no match is found, the object is
+### ignored.  Otherwise, the object is matched against all tables
+### which are registered in the "tables" hash of the subtree.  If the
+### object is not covered by any table, it is considered to be a
+### scalar object and the IID is constructed from the object's OID by
+### adding the index ".0".  Otherwise, the object is considered to be
+### part of the table and its indexer function is called with the OID
+### of the object, the base OID of the table and a reference to a hash
+### that describes the segment.  The indexer returns the IID of the
+### object.
+###
+### The value that will be returned for a query for the IID is
+### generated as follows.  The data type of the object is obtained
+### from the MIB by referencing the "type" field of the OID node
+### returned from a lookup in %SNMP::MIB.  The type is associated with
+### a class of the Snabb::SNMP::Tie package via the hash %class_map.
+### A scalar variable is then tied to this class, passing a reference
+### to the segment descriptor and the name of the object and possibly
+### a "handler".  The purpose of the handler is to apply
+### object-specfic manipulations to the value obtained from the shared
+### segment before passing it on to the master agent.
+###
+### The handler of an object is determined as follows.  If the object
+### is a scalar, it is looked up in the "handlers" hash of its
+### subtree.  If it is part of a table, the lookup is done in the
+### "handlers" hash of the table instead.  If the lookup fails, the
+### tied scalar uses no handler.  If the lookup succeeds, the
+### corresponding value is interpreted as a reference to a function
+### and associated with the tied variable.
+###
+### Finally, the IID is registered in the master MIB table %mibs as a
+### hash that contains the keys "type" and "value", where the type is
+### the data type of the object (more precisely, the type translated
+### through the hash %type_tr) and the value is a reference to the
+### tied value.
+###
+### When a request for the IID is received, the tied variable is
+### dereferenced to obtain the object's value.  Essentially, the Tie
+### class will read the raw value from the shared memory segment and
+### transform it to the proper type.  If the object is associated with
+### a handler, the handler is called with the value and a reference to
+### the segment descriptor to apply any special processing.  Finally,
+### the resulting value will be stored in the sub-agent's PDU and
+### handed back to the master agent.
+my %subtrees =
+  ( cpwVcMIB =>
+    { tables =>
+      { scalars =>
+	{ handlers =>
+	  { cpwVcIndexNext =>
+	    { compound_handler => sub { return $pwIndex; } },
+	    cpwVcPerfTotalErrorPackets =>
+	    { compound_handler => $compound_scalar_handlers{accumulator} },
+	  },
+	},
+
+	cpwVcTable =>
+	{ indexer => \&pw_indexer,
+	},
+      },
+    },
+
+    pwStdMIB =>
+    { tables =>
+      { scalars =>
+	{ handlers =>
+	  { pwIndexNext =>
+	    { compound_handler => sub { return $pwIndex; } },
+	    pwPerfTotalErrorPackets =>
+	    { compound_handler => $compound_scalar_handlers{accumulator} },
+	  },
+	},
+
+	pwTable =>
+	{ indexer => \&pw_indexer,
+	},
+      },
+    },
+
+    cpwVcEnetMIB =>
+    { tables =>
+      { cpwVcEnetTable =>
+	{ indexer => \&cpw_enet_indexer,
+	  handlers =>
+	  { cpwVcEnetPortIfIndex =>
+	    { handler => sub {
+		my ($value, $name, $segment) = @_;
+		my $aux_name = "_X_$name";
+		exists $segment->{objs}{$aux_name} or die
+		  "$name handler: auxiliary object $aux_name does not exist";
+		tie my $ifDescr, 'Snabb::SNMP::Tie::OCTETSTR', $segment,
+		  $aux_name;
+		my $ifIndex = $persistent_ifIndex{$ifDescr};
+		defined $ifIndex or die
+		  "$name handler: unknown interface $ifDescr";
+		return($ifIndex);
+	      }
+	    },
+	  },
+	},
+      },
+    },
+
+    pwEnetStdMIB =>
+    { tables =>
+      { pwEnetTable =>
+	{ indexer => \&pw_enet_indexer,
+	  handlers =>
+	  { pwEnetPortIfIndex =>
+	    { handler => sub {
+		my ($value, $name, $segment) = @_;
+		my $aux_name = "_X_$name";
+		exists $segment->{objs}{$aux_name} or die
+		  "$name handler: auxiliary object $aux_name does not exist";
+		tie my $ifDescr, 'Snabb::SNMP::Tie::OCTETSTR', $segment,
+		  $aux_name;
+		my $ifIndex = $persistent_ifIndex{$ifDescr};
+		defined $ifIndex or die
+		  "$name handler: unknown interface $ifDescr";
+		return($ifIndex);
+	      }
+	    },
+	  },
+	},
+      },
+    },
+
+  );
+
+GetOptions(\%opt, "check-interval=i", "mibs-dirs=s",
+           "ifindex=s") or usage();
+defined $opt{ifindex} or usage();
+Snabb::SNMP::Agent::start({ name => "pseudowire",
+                            subtrees => \%subtrees,
+			    check_interval => $opt{'check-interval'},
+                            if_index => $opt{ifindex},
+                            mibs_dirs => $opt{'mibs-dirs'},
+                            mibs => 'CISCO-SMI:CISCO-IETF-PW-TC-MIB'
+                            .':CISCO-IETF-PW-MIB:PW-STD-MIB'
+                            .':CISCO-IETF-PW-ENET-MIB:PW-ENET-STD-MIB',
+                            shmem_dir => $opt{'shmem-dir'},
+			  });
+
+## Not reached
+
+## Local Variables:
+## mode: CPerl
+## End:
