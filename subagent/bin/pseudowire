@@ -5,7 +5,7 @@ use Getopt::Long;
 use Snabb::SNMP::Agent qw(%persistent_ifIndex %compound_scalar_handlers);
 my %opt = ( 'check-interval' => 5,
             'mibs-dirs' => '',
-            'shmem-dir' => '/tmp/snabb-shmem');
+            'shmem-dir' => '/var/lib/snabb/shmem');
 
 sub usage() {
   print <<"EOF";
@@ -219,7 +219,7 @@ my %subtrees =
   );
 
 GetOptions(\%opt, "check-interval=i", "mibs-dirs=s",
-           "ifindex=s") or usage();
+           "ifindex=s", "shmem-dir=s") or usage();
 defined $opt{ifindex} or usage();
 Snabb::SNMP::Agent::start({ name => "pseudowire",
                             subtrees => \%subtrees,

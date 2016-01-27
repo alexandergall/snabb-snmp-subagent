@@ -10,7 +10,7 @@ WriteMakefile(
                            'NetSNMP::ASN' => '5.0.404',
                            'Net::SNMP' => '6.0.1',
                          },
-    EXE_FILES         => [ 'bin/interfaces', 'bin/pseudowire' ],
+    EXE_FILES         => [ 'bin/interface', 'bin/pseudowire' ],
     ABSTRACT          => 'AgentX-based SNMP sub-agent for Snabb applications',
     AUTHOR            => 'Alexander Gall <gall@switch.ch>',
     #LICENSE           => 'perl',
