@@ -62,7 +62,7 @@ my %subtrees =
 GetOptions(\%opt, "check-interval=i",
            "ifindex=s", "shmem-dir=s") or usage();
 defined $opt{ifindex} or usage();
-Snabb::SNMP::Agent::start({ name => "interfaces",
+Snabb::SNMP::Agent::start({ name => "interface",
                             subtrees => \%subtrees,
 			    check_interval => $opt{'check-interval'},
 			    if_index => $opt{ifindex},
