@@ -1,4 +1,4 @@
-bin/interfaces
+bin/interface
 bin/pseudowire
 Changes
 lib/Snabb/SNMP/Agent.pm

@@ -8,7 +8,7 @@ WriteMakefile(
     PREREQ_PM         => { SNMP => 5.0404,
                            'NetSNMP::agent' => '5.0404',
                            'NetSNMP::ASN' => '5.0.404',
-                           'Net::SNMP' => '6.0.1',
+                           'Net::SNMP' => 'v6.0.1',
                          },
     EXE_FILES         => [ 'bin/interface', 'bin/pseudowire' ],
     ABSTRACT          => 'AgentX-based SNMP sub-agent for Snabb applications',
