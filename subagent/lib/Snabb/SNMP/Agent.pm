@@ -293,7 +293,7 @@ sub parse_shmem() {
       ## Weird: when an non-existant object is accessed for the
       ## first time, the result is undef, but subsequent accesses
       ## return a reference to an empty hash :/
-      if ($name =~ /^_X/ or (not defined $oid_node or
+      if (not $name =~ /^_X/ and (not defined $oid_node or
                              keys(%{$oid_node}) == 0)) {
 	##warn "$idx: unokwn object $name, skipping";
       } else {

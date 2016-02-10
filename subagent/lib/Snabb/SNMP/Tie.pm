@@ -107,8 +107,6 @@ sub FETCH {
       if ($stamp_abs != 0) {
 	$stamp = 100*(time() - $stamp_abs);
       }
-    } else {
-      print("abs ticks $aux_name\n");
     }
   }
   return $stamp;
