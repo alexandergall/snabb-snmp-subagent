@@ -516,16 +516,6 @@ sub idx_watcher() {
   alarm $config{check_interval};
 }
 
-# sub ifIndex($) {
-#   my ($if) = @_;
-#   print("FOO ".%persistent_ifIndex."\n");
-#   return($persistent_ifIndex{$if});
-# }
-
-# sub ifNumber() {
-#   return(scalar(keys(%persistent_ifIndex)));
-# }
-
 sub start($) {
   my ($args) = @_;
 
