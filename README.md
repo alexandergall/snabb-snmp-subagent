@@ -5,7 +5,7 @@ applications (https://github.com/SnabbCo/snabbswitch).  Those
 applications don't provide an SNMP agent themselves.  Instead, they
 store the raw SNMP objects in shared memory segments.
 
-The subgagents provided by this package register themselves with a
+The subagents provided by this package register themselves with a
 local SNMP agent via the AgentX protocol to serve particular branches
 of the OID tree.  The objects within those branches are fetched from
 the memory segments shared with the Snabb applications.
@@ -34,7 +34,7 @@ a non-negative integer which represents the time, modulo 2^32
 (4294967296 decimal), in hundredths of a second between two epochs
 ```
 
-The representaion of a time interval is straight forward, but that of
+The representation of a time interval is straight forward, but that of
 an absolute point in time, called the `TimeStamp` textual convention
 for the `TimeTicks` type is a bit peculiar.  It is defined as the
 value of the `sysUpTime` object at that point in time, where
@@ -58,7 +58,7 @@ where `currenttime()` returns the number of seconds since the UNIX
 epoch.
 
 When a Snabb process needs to store an object of time `TimeStamp`, it
-allocates an axuiliary object whose name is obtained by adding the
+allocates an auxiliary object whose name is obtained by adding the
 prefix `_X_` and suffix `_TimeAbs` to the name of the object.  For
 example, the name of the auxiliary object for the object
 `pwCreateTime` is called `_X_pwCreateTime_TimeAbs`.
@@ -193,7 +193,7 @@ master agentx
 agentXSocket  tcp6:[::1]:705
 ```
 
-Each subagent also requires a confguration file containing the line
+Each subagent also requires a configuration file containing the line
 
 ```
 agentXSocket  tcp6:[::1]:705
@@ -212,5 +212,5 @@ with the option `-I -ifTable` at the price that the SNMP objects of
 the local interfaces are no longer available.
 
 If access to the built-in MIBs is required, a separate instance of
-`snmpd` needs to be started, either by chosing a different UDP port or
+`snmpd` needs to be started, either by choosing a different UDP port or
 by binding to a different local address (e.g. a loopback address).
