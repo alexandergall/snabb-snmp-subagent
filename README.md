@@ -38,7 +38,7 @@ The representation of a time interval is straight forward, but that of
 an absolute point in time, called the `TimeStamp` textual convention
 for the `TimeTicks` type is a bit peculiar.  It is defined as the
 value of the `sysUpTime` object at that point in time, where
-`sysUptime` itself counts the time ticks since the SNMP agent was
+`sysUpTime` itself counts the time ticks since the SNMP agent was
 started.
 
 To simplify the handling of objects of this type, the subagents make
@@ -202,6 +202,19 @@ agentXSocket  tcp6:[::1]:705
 These files must be located in the state directory of the `net-snmp`
 package, usually `/var/lib/net-snmp` and named like the subagent with
 suffix `.conf`, e.g. `interface.conf` and `pseudowire.conf`.
+
+#### Add `snabb` Community to access `sysUpTime`
+
+As explained above, each subagent must query the master agent for the
+value of the `sysUpTime` object with the fixed community string
+`snabb`.  The following configuration in `snmpd.conf` enables this
+community to access only `sysUpTime` via `localhost`
+
+```
+view sysUpTime included .1.3.6.1.2.1.1.3
+rocommunity snabb 127.0.0.1 -V sysUpTime
+rocommunity6 snabb ::1 -V sysUpTime
+```
 
 #### <a name="disable-built-in">Disabling built-in MIBs</a>
 
