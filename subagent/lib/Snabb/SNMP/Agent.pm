@@ -130,7 +130,7 @@ my %class_map = ( INTEGER => 'Snabb::SNMP::Tie::INTEGER',
 		);
 
 
-my $rebuild_mib = 1;
+my $rebuild_mib = 0;
 
 ### Mappings of types provided by SNMP::getType() to those
 ### used by NetSNMP::ASN
@@ -147,7 +147,7 @@ my %type_tr =
   );
 
 ##
-my $snabb_shmem_dir_ctime;
+my $snabb_shmem_dir_ctime = 0;
 my %shmem;
 our %compound_scalar_handlers =
   ( accumulator => sub {
@@ -505,28 +505,30 @@ sub agentx_handler {
 
 sub idx_watcher() {
   unless ($rebuild_mib) {
-    opendir(SHMEMD, $config{shmem_dir}) or die
-      "open of directory $config{shmem_dir} failed: $!";
-    my $ctime = (stat(SHMEMD))[9] or die
-      "stat of directory $config{shmem_dir} failed: $!";
-    close(SHMEMD);
-    if ($ctime != $snabb_shmem_dir_ctime) {
-      print("idx_watcher: data directory change detected.\n");
-      $rebuild_mib = 1;
-    } else {
-      for my $segment (keys(%shmem)) {
-	my $idx = $shmem{$segment}{file}.".index";
-	open(IDX, $idx) or die
-	  "idx_watcher: can't open $idx: $!";
-	my $mtime = (stat(IDX))[9] or die
-	  "idx_watcher: can't stat $idx: $!";
-	close(IDX);
-	if ($mtime != $shmem{$segment}{idx_mtime}) {
-	  print("idx_watcher: $idx changed\n");
-	  $rebuild_mib = 1;
-	  last;
+    if (opendir(SHMEMD, $config{shmem_dir})) {
+      my $ctime = (stat(SHMEMD))[9] or die
+	"stat of directory $config{shmem_dir} failed: $!";
+      close(SHMEMD);
+      if ($ctime != $snabb_shmem_dir_ctime) {
+	print("idx_watcher: data directory $config{shmem_dir} change detected\n");
+	$rebuild_mib = 1;
+      } else {
+	for my $segment (keys(%shmem)) {
+	  my $idx = $shmem{$segment}{file}.".index";
+	  open(IDX, $idx) or die
+	    "idx_watcher: can't open $idx: $!";
+	  my $mtime = (stat(IDX))[9] or die
+	    "idx_watcher: can't stat $idx: $!";
+	  close(IDX);
+	  if ($mtime != $shmem{$segment}{idx_mtime}) {
+	    print("idx_watcher: $idx changed\n");
+	    $rebuild_mib = 1;
+	    last;
+	  }
 	}
       }
+    } else {
+      warn "open of directory $config{shmem_dir} failed: $!";
     }
   }
   alarm $config{check_interval};
