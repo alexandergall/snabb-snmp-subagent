@@ -81,6 +81,28 @@ sub cpw_enet_indexer($$$) {
   return $oid.".".$cpwVcEnetPwVlan;
 }
 
+## Handler for {cpwVC, pw}EnetPortIfIndex
+sub enet_port_ifindex_handler($$$) {
+  my ($value, $name, $segment) = @_;
+  my $aux_name = "_X_$name";
+  exists $segment->{objs}{$aux_name} or die
+    "$name handler: auxiliary object $aux_name does not exist";
+  tie my $ifDescr, 'Snabb::SNMP::Tie::OCTETSTR', $segment,
+    $aux_name;
+  ## An empty string indicates that the port is not associated
+  ## with a proper interface (e.g. if it is a virtual bridge
+  ## port in case of a multi-point VPN).
+  my $ifIndex = 0;
+  if ($ifDescr ne '') {
+    unless (defined ($ifIndex = $persistent_ifIndex{$ifDescr})) {
+      warn "$name handler: unknown interface $ifDescr, "
+	."synthesizing EnetPortIfIndex = 0";
+      $ifIndex = 0;
+    }
+  }
+  return($ifIndex);
+}
+
 my %subtrees =
   ( cpwVcMIB =>
     { tables =>
@@ -122,19 +144,7 @@ my %subtrees =
 	{ indexer => \&cpw_enet_indexer,
 	  handlers =>
 	  { cpwVcEnetPortIfIndex =>
-	    { handler => sub {
-		my ($value, $name, $segment) = @_;
-		my $aux_name = "_X_$name";
-		exists $segment->{objs}{$aux_name} or die
-		  "$name handler: auxiliary object $aux_name does not exist";
-		tie my $ifDescr, 'Snabb::SNMP::Tie::OCTETSTR', $segment,
-		  $aux_name;
-		my $ifIndex = $persistent_ifIndex{$ifDescr};
-		defined $ifIndex or die
-		  "$name handler: unknown interface $ifDescr";
-		return($ifIndex);
-	      }
-	    },
+	    { handler => \&enet_port_ifindex_handler },
 	  },
 	},
       },
@@ -146,19 +156,7 @@ my %subtrees =
 	{ indexer => \&pw_enet_indexer,
 	  handlers =>
 	  { pwEnetPortIfIndex =>
-	    { handler => sub {
-		my ($value, $name, $segment) = @_;
-		my $aux_name = "_X_$name";
-		exists $segment->{objs}{$aux_name} or die
-		  "$name handler: auxiliary object $aux_name does not exist";
-		tie my $ifDescr, 'Snabb::SNMP::Tie::OCTETSTR', $segment,
-		  $aux_name;
-		my $ifIndex = $persistent_ifIndex{$ifDescr};
-		defined $ifIndex or die
-		  "$name handler: unknown interface $ifDescr";
-		return($ifIndex);
-	      }
-	    },
+	    { handler => \&enet_port_ifindex_handler },
 	  },
 	},
       },
