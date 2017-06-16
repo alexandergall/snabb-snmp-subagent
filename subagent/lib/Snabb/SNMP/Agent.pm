@@ -16,6 +16,99 @@
 
 package Snabb::SNMP::Agent;
 
+=head1 NAME
+
+Snabb::SNMP::Agent
+
+=head1 SYNOPSIS
+
+use Snabb::SNMP::Agent;
+
+=head1 DESCRITPION
+
+Clients of this module must pass a reference to a hash (referred
+to as %subtrees in the following) that defines the subtrees that
+it wants to have registered with the master agent.  The hash must
+be structured as follows.
+
+The term "object" refers to a string which is either a literal OID
+(in dotted notation) or a name that can be translated to an OID
+through the loaded MIBs (via %SNMP::MIB).
+
+The keys of %subtrees are objects that designate the subtrees that
+will be registered with the master agent.  Each subtree may
+contain two hashes named "handlers" and "tables".  The keys of
+these hashes are objects which must be part of the subtree.
+Subtrees must not overlap.
+
+The "tables" hash must contain a key called "indexer", which must
+be a reference to a function that is able to create the full
+instance ID (IID) for any object in the table.
+
+The subtrees are populated with objects from memory segments
+shared with Snabb instances that use the lib.ipc.shmem mechansim
+with the name space "MIB" as follows.
+
+Once an object is read from the index file of a shared memory
+segment, a lookup in the subtree hash is performed to find the
+subtree that contains it.  If no match is found, the object is
+ignored.  Otherwise, the object is matched against all tables
+which are registered in the "tables" hash of the subtree.  If the
+object is not covered by any table, it is considered to be a
+scalar object and the IID is constructed from the object's OID by
+adding the index ".0".  Otherwise, the object is considered to be
+part of the table and its indexer function is called with the OID
+of the object, the base OID of the table and a reference to a hash
+that describes the segment.  The indexer returns the IID of the
+object.
+
+The value that will be returned for a query for the IID is
+generated as follows.  The data type of the object is obtained
+from the MIB by referencing the "type" field of the OID node
+returned from a lookup in %SNMP::MIB.  The type is associated with
+a class of the Snabb::SNMP::Tie package via the hash %class_map.
+A scalar variable is then tied to this class, passing a reference
+to the segment descriptor and the name of the object and possibly
+a "handler".  The purpose of the handler is to apply
+object-specfic manipulations to the value obtained from the shared
+segment before passing it on to the master agent.
+
+The handler of an object is determined as follows.  If the object
+is a scalar, it is looked up in the "handlers" hash of its
+subtree.  If it is part of a table, the lookup is done in the
+"handlers" hash of the table instead.  If the lookup fails, the
+tied scalar uses no handler.  If the lookup succeeds, the
+corresponding value is interpreted as a reference to a function
+and associated with the tied variable.
+
+Finally, the IID is registered in the master MIB table %mibs as a
+hash that contains the keys "type" and "value", where the type is
+the data type of the object (more precisely, the type translated
+through the hash %type_tr) and the value is a reference to the
+tied value.
+
+When a request for the IID is received, the tied variable is
+dereferenced to obtain the object's value.  Essentially, the Tie
+class will read the raw value from the shared memory segment and
+transform it to the proper type.  If the object is associated with
+a handler, the handler is called with the value and a reference to
+the segment descriptor to apply any special processing.  Finally,
+the resulting value will be stored in the sub-agent's PDU and
+handed back to the master agent.
+
+head1 METHODS
+
+Snabb::SNMP::Agent::start({ name => "agent-name",
+                            subtrees => \%subtrees,
+			    check_interval => 5,
+			    if_index => "./ifindex",
+                            mibs_dirs => '',
+                            mibs => '',
+                            shmem_dir => "/var/run/shmem",
+			  });
+
+=cut
+
 use 5.020002;
 use strict;
 use warnings;
@@ -31,75 +124,6 @@ our @ISA = qw(Exporter);
 our @EXPORT_OK = qw(scalar_indexer %compound_scalar_handlers %persistent_ifIndex $sysUpTime $sysUpTime_base);
 our $VERSION = '0.01';
 
-### Clients of this module must pass a reference to a hash (referred
-### to as %subtrees in the following) that defines the subtrees that
-### it wants to have registered with the master agent.  The hash must
-### be structured as follows.
-###
-### The term "object" refers to a string which is either a literal OID
-### (in dotted notation) or a name that can be translated to an OID
-### through the loaded MIBs (via %SNMP::MIB).
-###
-### The keys of %subtrees are objects that designate the subtrees that
-### will be registered with the master agent.  Each subtree may
-### contain two hashes named "handlers" and "tables".  The keys of
-### these hashes are objects which must be part of the subtree.
-### Subtrees must not overlap.
-###
-### The "tables" hash must contain a key called "indexer", which must
-### be a reference to a function that is able to create the full
-### instance ID (IID) for any object in the table.
-###
-### The subtrees are populated with objects from memory segments
-### shared with Snabb instances that use the lib.ipc.shmem mechansim
-### with the name space "MIB" as follows.
-###
-### Once an object is read from the index file of a shared memory
-### segment, a lookup in the subtree hash is performed to find the
-### subtree that contains it.  If no match is found, the object is
-### ignored.  Otherwise, the object is matched against all tables
-### which are registered in the "tables" hash of the subtree.  If the
-### object is not covered by any table, it is considered to be a
-### scalar object and the IID is constructed from the object's OID by
-### adding the index ".0".  Otherwise, the object is considered to be
-### part of the table and its indexer function is called with the OID
-### of the object, the base OID of the table and a reference to a hash
-### that describes the segment.  The indexer returns the IID of the
-### object.
-###
-### The value that will be returned for a query for the IID is
-### generated as follows.  The data type of the object is obtained
-### from the MIB by referencing the "type" field of the OID node
-### returned from a lookup in %SNMP::MIB.  The type is associated with
-### a class of the Snabb::SNMP::Tie package via the hash %class_map.
-### A scalar variable is then tied to this class, passing a reference
-### to the segment descriptor and the name of the object and possibly
-### a "handler".  The purpose of the handler is to apply
-### object-specfic manipulations to the value obtained from the shared
-### segment before passing it on to the master agent.
-###
-### The handler of an object is determined as follows.  If the object
-### is a scalar, it is looked up in the "handlers" hash of its
-### subtree.  If it is part of a table, the lookup is done in the
-### "handlers" hash of the table instead.  If the lookup fails, the
-### tied scalar uses no handler.  If the lookup succeeds, the
-### corresponding value is interpreted as a reference to a function
-### and associated with the tied variable.
-###
-### Finally, the IID is registered in the master MIB table %mibs as a
-### hash that contains the keys "type" and "value", where the type is
-### the data type of the object (more precisely, the type translated
-### through the hash %type_tr) and the value is a reference to the
-### tied value.
-###
-### When a request for the IID is received, the tied variable is
-### dereferenced to obtain the object's value.  Essentially, the Tie
-### class will read the raw value from the shared memory segment and
-### transform it to the proper type.  If the object is associated with
-### a handler, the handler is called with the value and a reference to
-### the segment descriptor to apply any special processing.  Finally,
-### the resulting value will be stored in the sub-agent's PDU and
-### handed back to the master agent.
 
 ## Default configuration
 my %config = ( check_interval => undef,
