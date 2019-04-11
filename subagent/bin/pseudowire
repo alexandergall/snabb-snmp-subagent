@@ -21,7 +21,8 @@ use Getopt::Long;
 use Snabb::SNMP::Agent qw(%persistent_ifIndex %compound_scalar_handlers);
 my %opt = ( 'check-interval' => 5,
             'mibs-dirs' => '',
-            'shmem-dir' => '/var/lib/snabb/shmem');
+            'shmem-dir' => '/var/lib/snabb/shmem',
+            'pseudowires' => '');
 
 sub usage() {
   print <<"EOF";
@@ -29,6 +30,9 @@ usage: $0 --ifindex=<file>
 EOF
   exit(1);
 }
+
+## List of PWs in use by currently running instances
+my %pwIDs;
 
 ## Mappings of PW shared memory segments to the index of the
 ## pwTable/cpwVcTable
@@ -40,6 +44,10 @@ my $pwIndex = 1;
 sub pw_indexer($$$) {
   my ($oid, $table_oid, $segment) = @_;
   my $name = $segment->{name};
+  if (not $pwIDs{$name}) {
+    warn "Unknown pseudowire $name, skipping";
+    return undef;
+  }
   my $index = $pwIndex{$name};
   unless (defined $index) {
     $index = $pwIndex++;
@@ -55,6 +63,7 @@ sub pw_indexer($$$) {
 sub pw_enet_indexer($$$) {
   my ($oid, $table_oid, $segment) = @_;
   $oid = pw_indexer($oid, $table_oid, $segment);
+  $oid or return undef;
   my $pwEnetPwInstance_obj = $segment->{objs}{pwEnetPwInstance};
   defined $pwEnetPwInstance_obj or
     die "pw_enet_indexer: no pwEnetPwInstance present for segment "
@@ -165,8 +174,23 @@ my %subtrees =
   );
 
 GetOptions(\%opt, "check-interval=i", "mibs-dirs=s",
-           "ifindex=s", "shmem-dir=s") or usage();
-defined $opt{ifindex} or usage();
+           "ifindex=s", "shmem-dir=s", "pseudowires=s") or usage();
+defined $opt{ifindex} and $opt{pseudowires} or usage();
+
+## Build the list of active pseudowires.  A pseudowire segment is only
+## parsed if its name is on this list.  This is used to skip left-over
+## segments that are not in use by any running instance.
+open(PWS, $opt{pseudowires}) or
+  die "Can't open pseudowire ID file $opt{pseudowires}: $!";
+while (<PWS>) {
+  chomp;
+  (my ($pwID) = split(/\s+/)) == 1 or
+    die "Parse error in pseudowire ID file $opt{pseudowires}";
+  print("Adding pseudowire $pwID\n");
+  $pwIDs{$pwID} = 1;
+}
+close(IFINDEX);
+
 Snabb::SNMP::Agent::start({ name => "pseudowire",
                             subtrees => \%subtrees,
 			    check_interval => $opt{'check-interval'},
