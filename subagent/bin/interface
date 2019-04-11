@@ -38,8 +38,10 @@ sub ifTable_indexer($$$) {
   tie my $ifDescr, 'Snabb::SNMP::Tie::OCTETSTR', $segment,
     'ifDescr';
   my $ifIndex = $persistent_ifIndex{$ifDescr};
-  defined $ifIndex or die
-    "ifTable IID indexer: unknown interface $ifDescr";
+  if (not defined $ifIndex) {
+    warn "ifTable IID indexer: unknown interface $ifDescr, ignoring";
+    return undef;
+  }
   return($oid.".".$ifIndex);
 }
 

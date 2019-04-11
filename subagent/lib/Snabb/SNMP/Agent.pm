@@ -391,6 +391,7 @@ sub populate_mibs () {
       %{$config{subtrees}->{$_}{mib}{$oid}} = %{$mibs_persistent{$mib_oid}{$oid}};
     }
   }
+ SEGMENT:
   foreach my $segment (keys(%shmem)) {
     print("Processing segment $segment\n");
     my $seg_ref = $shmem{$segment};
@@ -406,6 +407,7 @@ sub populate_mibs () {
         next;
       }
       my $iid = $table->{indexer}($oid, $table->{oid}, $seg_ref);
+      $iid or next SEGMENT;
       my $handler;
       foreach my $obj2 (keys(%{$table->{handlers}})) {
 	if ($oid eq $table->{handlers}{$obj2}{oid}) {
