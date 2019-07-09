@@ -145,6 +145,8 @@ parts thereof
       * `cpwVcEnetTable` (.1.3.6.1.4.1.9.10.108.1.1)
    * From `pwEnetStdMIB`  (1.3.6.1.2.1.180)
       * `pwEnetTable` (1.3.6.1.2.1.180.1.1)
+   * `vplsGenericMIB` (.1.3.6.1.2.1.10.274)
+   * `cvplsGenericMIB` (.1.3.6.1.4.1.9.10.138)
 
 All objects that belong to a particular pseudowire are stored in the
 same shared memory segment by the Snabb application.  The `pseudowire`
@@ -152,6 +154,21 @@ agent maintains a monotonically increasing counter to enumerate the
 pseudowires.  It is increased each time a new memory segment is read.
 This counter is used as the `pwIndex` to identify the conceptual row
 assigned to the pseudowire in the `cpwVcTable` and `pwTable` tables.
+
+The Snabb application also collects all objects belonging to a
+specific VPLS instance in a separate shared memory segment.  The agent
+assigns an index to each VPLS in the same fashion as for pseudowires.
+The index is used to identify conceptual rows in the `vplsConfigTable`
+and `cvplsConfigTable` tables.
+
+The VPLS MIB also contains a table that links it with the table of
+pseudowires.  This table has two indices: the VPLS index and the index
+of the pseudowire.  This is why the `vplsPwBindTable/cvplsPwBindTable`
+objects are stored in the memeory segments of the pseudowires.  These
+segments also contain an auxiliary object that contains the name of
+the VPLS to which it belongs.  The `pseudowire` agent generates the
+VPLS index from that object and the pseudowire index from the name of
+the pseudowire.
 
 ## Configuration
 
@@ -180,6 +197,19 @@ Subagents that need access to the `ifIndex` mapping (`interface` and
    * `--ifindex`: the path to a file which holds the static mapping of
      PCI addresses to `ifIndex` values as shown in the [description of
      the `interface` subagent](#interface_agent)
+
+The `pseudowire` subagent also requires the following options
+
+   * `--vpls-ids`: the path to a file which contains a list of the
+     names of the VPLS instances provided by the Snabb application.
+
+   * `--pseudowire-ids`: the path to a file which contains a list of
+     the names of the pseudowires provided by the Snabb application.
+
+When the subagent scans the directory that contains the shared memory
+segments, it skips files referencing VPLS instances or pseudowires
+which are not contained in these lists to avoid confusion with
+left-over segments from previous instances of the Snabb application.
 
 ### `snmpd` Configuration
 

@@ -182,6 +182,10 @@ our %compound_scalar_handlers =
       }
       return int($accum);
     },
+    first_value => sub {
+      my ($values_ref) = @_;
+      return ${@{$values_ref}[0]};
+    }
   );
 
 ## Indexer for scalar objects. Simply attaches ".0" to the OID.
@@ -519,7 +523,7 @@ sub agentx_handler {
 	} elsif (scalar(@{$obj->{values}}) == 1) {
 	  $value = ${@{$obj->{values}}[0]};
 	} else {
-	  die "No comopund handler for multi scalar $oid";
+	  die "No compound handler for multi scalar $oid";
 	}
       }
       $request->setValue($obj->{type}, $value);
@@ -632,6 +636,7 @@ sub start($) {
     print("Registering subtree $st ($st_oid)\n");
     $agent->register("my_agent_name", $st_oid, \&agentx_handler);
   }
+  idx_watcher();
   $agent->main_loop();
 
   # Not reached

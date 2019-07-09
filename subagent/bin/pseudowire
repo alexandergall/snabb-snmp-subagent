@@ -22,7 +22,8 @@ use Snabb::SNMP::Agent qw(%persistent_ifIndex %compound_scalar_handlers);
 my %opt = ( 'check-interval' => 5,
             'mibs-dirs' => '',
             'shmem-dir' => '/var/lib/snabb/shmem',
-            'pseudowires' => '');
+            'vpls-ids' => '',
+            'pseudowire-ids' => '');
 
 sub usage() {
   print <<"EOF";
@@ -31,13 +32,48 @@ EOF
   exit(1);
 }
 
-## List of PWs in use by currently running instances
-my %pwIDs;
+## List of VPLSs and PWs in use by currently running instances
+my (%vplsIDs, %pwIDs);
 
-## Mappings of PW shared memory segments to the index of the
-## pwTable/cpwVcTable
-my %pwIndex;
+## Mappings of VPLS/PW shared memory segments to the index of
+## vplsConfigTable/cvplsConfigTable, pwTable/cpwVcTable
+my (%vplsIndex, %pwIndex);
+my $vplsIndex = 1;
 my $pwIndex = 1;
+
+## Indexer of vplsConfigTable/cvplsConfigTable. It uses the name of
+## the segment that represents a row in these tables to generate the
+## index.
+sub vpls_index_by_name($$) {
+  my ($oid, $name) = @_;
+  if (not $vplsIDs{$name}) {
+    warn "Unknown vpls $name, skipping";
+    return undef;
+  }
+  my $index = $vplsIndex{$name};
+  unless (defined $index) {
+    $index = $vplsIndex++;
+    print("Allocatin VPLS index $index for segment $name\n");
+    $vplsIndex{$name} = $index;
+  }
+  return $oid.".".$index;
+}
+
+sub vpls_indexer($$$) {
+  my ($oid, $table_oid, $segment) = @_;
+  return vpls_index_by_name($oid, $segment->{name});
+}
+
+## Indexer of vplsPwBindTable/cvplsPwBindTable.  It has two indexes.
+## The first is the index of the VPLS to which the pseudowire belongs,
+## which is derived from the auxiliary object _X_vplsName.  The second
+## is the index of the pseudowire.
+sub pw_bind_indexer($$$) {
+  my ($oid, $table_oid, $segment) = @_;
+  tie my $vplsName, 'Snabb::SNMP::Tie::OCTETSTR', $segment,
+    '_X_vplsName';
+  return pw_indexer(vpls_index_by_name($oid, $vplsName), $table_oid, $segment);
+}
 
 ## Indexer for pwTable/cpwVcTable.  It uses the name of the segment
 ## that represents a row in these tables to generate the index.
@@ -80,6 +116,7 @@ sub pw_enet_indexer($$$) {
 sub cpw_enet_indexer($$$) {
   my ($oid, $table_oid, $segment) = @_;
   $oid = pw_indexer($oid, $table_oid, $segment);
+  $oid or return undef;
   my $cpwVcEnetPwVlan_obj = $segment->{objs}{cpwVcEnetPwVlan};
   defined $cpwVcEnetPwVlan_obj or
     die "cpw_enet_indexer: no cpwVcEnetPwVlan present for segment "
@@ -113,7 +150,54 @@ sub enet_port_ifindex_handler($$$) {
 }
 
 my %subtrees =
-  ( cpwVcMIB =>
+  ( vplsGenericMIB =>
+    { tables =>
+      { scalars =>
+        { handlers =>
+          { vplsConfigIndexNext =>
+            { compound_handler => sub { return $vplsIndex; } },
+          },
+        },
+
+        vplsConfigTable =>
+        { indexer => \&vpls_indexer,
+        },
+        vplsStatusTable =>
+        { indexer => \&vpls_indexer,
+        },
+        vplsPwBindTable =>
+        { indexer => \&pw_bind_indexer,
+        },
+      },
+    },
+
+    cvplsGenericMIB =>
+    { tables =>
+      { scalars =>
+        { handlers =>
+          { cvplsConfigIndexNext =>
+            { compound_handler => sub { return $vplsIndex; } },
+            ## Identical values in all segments
+            cvplsStatusNotifEnable =>
+            { compound_handler => $compound_scalar_handlers{first_value} },
+            cvplsNotificationMaxRate =>
+            { compound_handler => $compound_scalar_handlers{first_value} },
+          },
+        },
+
+        cvplsConfigTable =>
+        { indexer => \&vpls_indexer,
+        },
+        cvplsStatusTable =>
+        { indexer => \&vpls_indexer,
+        },
+        cvplsPwBindTable =>
+        { indexer => \&pw_bind_indexer,
+        },
+      },
+    },
+
+    cpwVcMIB =>
     { tables =>
       { scalars =>
 	{ handlers =>
@@ -174,22 +258,28 @@ my %subtrees =
   );
 
 GetOptions(\%opt, "check-interval=i", "mibs-dirs=s",
-           "ifindex=s", "shmem-dir=s", "pseudowires=s") or usage();
-defined $opt{ifindex} and $opt{pseudowires} or usage();
+           "ifindex=s", "shmem-dir=s", "vpls-ids=s", "pseudowire-ids=s") or usage();
+defined $opt{ifindex} and $opt{"vpls-ids"} and $opt{"pseudowire-ids"} or usage();
 
 ## Build the list of active pseudowires.  A pseudowire segment is only
 ## parsed if its name is on this list.  This is used to skip left-over
 ## segments that are not in use by any running instance.
-open(PWS, $opt{pseudowires}) or
-  die "Can't open pseudowire ID file $opt{pseudowires}: $!";
-while (<PWS>) {
-  chomp;
-  (my ($pwID) = split(/\s+/)) == 1 or
-    die "Parse error in pseudowire ID file $opt{pseudowires}";
-  print("Adding pseudowire $pwID\n");
-  $pwIDs{$pwID} = 1;
+sub parse_identifiers($$) {
+  my ($type, $IDs) = @_;
+  open(INPUT, $opt{$type}) or
+    die "Can't open $type ID file $opt{$type}: $!";
+  while (<INPUT>) {
+    chomp;
+    (my ($ID) = split(/\s+/)) == 1 or
+      die "Parse error in $type ID file $opt{$type}";
+    print("Adding $type $ID\n");
+    $IDs->{$ID} = 1;
+  }
+  close(INPUT);
 }
-close(IFINDEX);
+
+parse_identifiers("vpls-ids", \%vplsIDs);
+parse_identifiers("pseudowire-ids", \%pwIDs);
 
 Snabb::SNMP::Agent::start({ name => "pseudowire",
                             subtrees => \%subtrees,
@@ -198,7 +288,9 @@ Snabb::SNMP::Agent::start({ name => "pseudowire",
                             mibs_dirs => $opt{'mibs-dirs'},
                             mibs => 'CISCO-SMI:CISCO-IETF-PW-TC-MIB'
                             .':CISCO-IETF-PW-MIB:PW-STD-MIB'
-                            .':CISCO-IETF-PW-ENET-MIB:PW-ENET-STD-MIB',
+                            .':CISCO-IETF-PW-ENET-MIB:PW-ENET-STD-MIB'
+                            .':CISCO-IETF-VPLS-GENERIC-MIB'
+                            .':VPLS-GENERIC-MIB',
                             shmem_dir => $opt{'shmem-dir'},
 			  });
 
