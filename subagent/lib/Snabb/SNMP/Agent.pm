@@ -155,6 +155,7 @@ my %class_map = ( INTEGER => 'Snabb::SNMP::Tie::INTEGER',
 
 
 my $rebuild_mib = 0;
+my $reread_ifindex = 0;
 
 ### Mappings of types provided by SNMP::getType() to those
 ### used by NetSNMP::ASN
@@ -172,6 +173,7 @@ my %type_tr =
 
 ##
 my $snabb_shmem_dir_ctime = 0;
+my $ifindex_mtime = 0;
 my %shmem;
 our %compound_scalar_handlers =
   ( accumulator => sub {
@@ -462,6 +464,33 @@ sub sort_mibs() {
 }
 
 sub maybe_rebuild_mibs() {
+  if ($reread_ifindex) {
+    print("Reading persistenf ifIndex mapping\n");
+    open(IFINDEX, $config{if_index}) or
+      die "Can't open ifIndex file $config{if_index}: $!";
+    my $new = {%persistent_ifIndex};
+    while (<IFINDEX>) {
+      chomp;
+      (my ($if, $index) = split(/\s+/)) == 2 or
+        die "Parse error in ifIndex file $config{if_index}";
+      if (not $new->{$if}) {
+        print("Adding ifIndex $index => $if\n");
+      } else {
+        delete $persistent_ifIndex{$if};
+        if ($new->{$if} != $index){
+          print("Changing ifIndex $new->{$if}: $index => $if\n");
+        }
+      }
+      $new->{$if} = $index;
+    }
+    close(IFINDEX);
+    for my $if (keys(%persistent_ifIndex)) {
+      print("Deleting ifIndex $if => $persistent_ifIndex{$if}\n");
+      delete $new->{$if};
+    }
+    %persistent_ifIndex = %{$new};
+    $reread_ifindex = 0;
+  }
   if ($rebuild_mib) {
     print("(Re)building MIBs\n");
     for my $segment (keys(%shmem)) {
@@ -533,7 +562,27 @@ sub agentx_handler {
   }
 }
 
+sub get_mtime($) {
+  my ($name) = @_;
+  open(FILE, $name) or die
+    "idx_watcher: can't open $name: $!";
+  my $mtime = (stat(FILE))[9] or die
+    "idx_watcher: can't stat $name: $!";
+  close(FILE);
+  return $mtime;
+}
+
 sub idx_watcher() {
+  if ($config{if_index} and not $reread_ifindex) {
+    my $mtime = get_mtime($config{if_index});
+    if ($mtime != $ifindex_mtime) {
+      print("idx_watcher: ifIndex file $config{if_index} change detected\n");
+      $ifindex_mtime = $mtime;
+      $reread_ifindex = 1;
+      $rebuild_mib = 1;
+    }
+  }
+
   unless ($rebuild_mib) {
     if (opendir(SHMEMD, $config{shmem_dir})) {
       my $ctime = (stat(SHMEMD))[9] or die
@@ -545,11 +594,7 @@ sub idx_watcher() {
       } else {
 	for my $segment (keys(%shmem)) {
 	  my $idx = $shmem{$segment}{file}.".index";
-	  open(IDX, $idx) or die
-	    "idx_watcher: can't open $idx: $!";
-	  my $mtime = (stat(IDX))[9] or die
-	    "idx_watcher: can't stat $idx: $!";
-	  close(IDX);
+          my $mtime = get_mtime($idx);
 	  if ($mtime != $shmem{$segment}{idx_mtime}) {
 	    print("idx_watcher: $idx changed\n");
 	    $rebuild_mib = 1;
@@ -575,20 +620,6 @@ sub start($) {
 	die "missing mandatory option $option";
       }
     }
-  }
-
-  ## Parse the persistent ifIndex table
-  if ($config{if_index}) {
-    open(IFINDEX, $config{if_index}) or
-      die "Can't open ifIndex file $config{if_index}: $!";
-    while (<IFINDEX>) {
-      chomp;
-      (my ($if, $index) = split(/\s+/)) == 2 or
-        die "Parse error in ifIndex file $config{if_index}";
-      print("Adding ifIndex $index => $if\n");
-      $persistent_ifIndex{$if} = $index;
-    }
-    close(IFINDEX);
   }
 
   $config{mibs_dirs} and $ENV{MIBDIRS} = "+$config{mibs_dirs}";
