@@ -29,15 +29,20 @@ EOF
   exit(1);
 }
 
-sub ifTable_indexer($$$) {
-  ## Force persistent ifIndex based on ifDescr
-  my ($oid, $table_oid, $segment) = @_;
+sub ifIndex($) {
+  my ($segment) = @_;
   my $ifDescr_obj = $segment->{objs}{ifDescr};
   defined $ifDescr_obj or die
     "ifTable IID indexer: no ifDescr present for $segment->{name}";
   tie my $ifDescr, 'Snabb::SNMP::Tie::OCTETSTR', $segment,
     'ifDescr';
-  my $ifIndex = $persistent_ifIndex{$ifDescr};
+  return $persistent_ifIndex{$ifDescr}, $ifDescr;
+}
+
+sub ifTable_indexer($$$) {
+  ## Force persistent ifIndex based on ifDescr
+  my ($oid, $table_oid, $segment) = @_;
+  my ($ifIndex, $ifDescr) = ifIndex($segment);
   if (not defined $ifIndex) {
     warn "ifTable IID indexer: unknown interface $ifDescr, ignoring";
     return undef;
@@ -57,7 +62,14 @@ my %subtrees =
 	    },
 	  },
 	},
-	ifTable => { indexer => \&ifTable_indexer },
+	ifTable =>
+        {
+         indexer => \&ifTable_indexer,
+         handlers =>
+          { ifIndex =>
+            { handler => sub { my ($value, $name,$segment) = @_; return (ifIndex($segment))[0]; } }
+          }
+        },
       },
     },
 
